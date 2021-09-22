@@ -6,6 +6,6 @@ class Config:
     AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN", default="")
     AWS_REGION = os.getenv("AWS_REGION", default="us-east-1")
     # default UTTERANCE_CONFIG_BUCKET is for 009-dev while waiting for devops changes to occur
-    CONFIG_BUCKET = os.getenv("UTTERANCE_CONFIG_BUCKET", default="")
-    CONFIG_PATH = os.getenv("UTTERANCE_CONFIG_PATH", default="")
+    CONFIG_BUCKET = os.getenv("S3_CONFIG_BUCKET", default="")
+    CONFIG_PATH = os.getenv("S3_CONFIG_PATH", default="")
     pass
