@@ -1,5 +1,17 @@
 Changelog
 =========
+0.3.0
+-----
+
+- Modified aws client so it could be run in AWS containers with assume role rights.
+- Modify setup.py to install software instead of do tests.
+- Remove tox.
+- Repurpose Makefile for building app rather than run tox tests.
+- Remove sphynx docs folder as this is a fork and will not be posted to the original.
+- Remove method 'list_directory'
+- Replaced auth mechanism
+- Changed requests library to a higher level one.
+- Added config.py to capture needed variables (useful for when running as a container in AWS)
 
 0.2.0
 -----

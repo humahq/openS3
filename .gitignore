@@ -61,3 +61,11 @@ target/
 
 # openS3
 env.sh
+
+# Selected vs code
+**/.vscode/*
+!**/.vscode/launch.json
+!**/.vscode/sample.env
+
+openS3/testfile_out.yml
+openS3/testfile_out.json

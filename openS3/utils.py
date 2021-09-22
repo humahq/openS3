@@ -5,7 +5,7 @@ import hmac
 import re
 from urllib import parse
 
-from .constants import ENCODING, AWS_DATETIME_FORMAT
+from openS3.constants import ENCODING, AWS_DATETIME_FORMAT
 
 
 def b64_string(byte_string):

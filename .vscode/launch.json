@@ -1,0 +1,26 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    // "args": ["--command-line", "--flush-local-cache", "--generate-new-local-cache", "--push-local-cache-to-s3", "--answer-cache"]
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "env": {
+                "PYCURL_SSL_LIBRARY": "openssl",
+                "LDFLAGS": "-L/usr/local/opt/openssl/lib",
+                "CPPFLAGS": "-I/usr/local/opt/openssl/include",
+                "PYTHONIOENCODING": "utf-8",
+                "AWS_DEFAULT_REGION": "us-east-1"
+            },
+            "envFile": "${workspaceFolder}/.vscode/.env",
+            "args": [],
+            "justMyCode": false
+        }
+    ]
+}

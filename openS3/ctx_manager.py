@@ -2,16 +2,19 @@ from contextlib import closing
 from datetime import datetime
 import hashlib
 import hmac
-from http.client import HTTPConnection
+from http.client import HTTPConnection, HTTPSConnection
 import os
 import urllib.parse
 from wsgiref.handlers import format_date_time
 from xml.etree import ElementTree
+import requests
+from aws_requests_auth.aws_auth import AWSRequestsAuth
 
-from .constants import (
+from openS3.config import Config
+from openS3.constants import (
     CONTENT_TYPES, ENCODING, VALID_MODES, DEFAULT_CONTENT_TYPE, OBJECT_URL_SCHEME,
     AWS_S3_REGION, AWS_S3_SERVICE)
-from .utils import (
+from openS3.utils import (
     validate_values, b64_string, S3FileDoesNotExistError, S3IOError,
     get_canonical_query_string, get_canonical_headers_string,
     get_signing_key, hmac_sha256, uri_encode, get_dirs_and_files)
@@ -21,7 +24,11 @@ class OpenS3(object):
     """
     A context manager for interfacing with S3.
     """
-    def __init__(self, bucket, access_key, secret_key):
+    def __init__(self, 
+                 bucket=Config.CONFIG_BUCKET,
+                 access_key=Config.AWS_ACCESS_KEY_ID,
+                 secret_key=Config.AWS_SECRET_ACCESS_KEY,
+                 session_token=Config.AWS_SESSION_TOKEN):
         """
         Create a new context manager for interfacing with S3.
 
@@ -32,10 +39,12 @@ class OpenS3(object):
         self.bucket = bucket
         self.access_key = access_key
         self.secret_key = secret_key
+        self.session_token = session_token
         validate_values(validation_func=lambda value: value is not None, dic=locals())
-        self.netloc = '{}.s3.amazonaws.com'.format(bucket)
+        self.netloc = '{}.s3.amazonaws.com'.format(self.bucket)
         self.mode = 'rb'
         self.acl = 'private'
+        self.auth = self._get_auth()
 
         # File like attributes
         self.object_key = ''
@@ -52,6 +61,15 @@ class OpenS3(object):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+    def _get_auth(self):
+        auth = AWSRequestsAuth(aws_access_key=self.access_key,
+            aws_secret_access_key=self.secret_key,
+            aws_host=self.netloc,
+            aws_region=Config.AWS_REGION,
+            aws_service=AWS_S3_SERVICE,
+            aws_token=self.session_token)
+        return auth
 
     def read(self):
         """
@@ -120,7 +138,7 @@ class OpenS3(object):
             # TODO from S3 before we write over it?
             self._put()
         # Reset OpenS3 object
-        self.__init__(self.bucket, self.access_key, self.secret_key)
+        self.__init__()
 
     @property
     def content_type(self):
@@ -158,7 +176,7 @@ class OpenS3(object):
         # The file hasn't been retrieved from AWS, retrieve it.
         if not self.buffer and not self.response_headers:
             self._get()
-        return len(self.buffer)  # TODO is this the right way to get size of buffer (bytes)?
+        return str(len(self.buffer))  # TODO is this the right way to get size of buffer (bytes)?
 
     @property
     def url(self):
@@ -177,68 +195,52 @@ class OpenS3(object):
         return b64_string(digest)
 
     def _head(self):
-        request_headers = self._build_request_headers('HEAD', self.object_key)
-        with closing(HTTPConnection(self.netloc)) as conn:
-            conn.request('HEAD', self.url, headers=request_headers)
-            response = conn.getresponse()
-            self.response_headers = response.headers
-            return response
+        object_url = "https://" + self.netloc + "/" + self.object_key
+        response = requests.head(object_url, auth=self.auth)
+        return response
 
     def _get(self):
         """
         GET contents of remote S3 object.
         """
-        request_headers = self._build_request_headers('GET', self.object_key)
-        with closing(HTTPConnection(self.netloc)) as conn:
-            conn.request('GET', self.object_key, headers=request_headers)
-            response = conn.getresponse()
-            if response.status not in (200, 204):
-                if response.length is None:
+        object_url = "https://" + self.netloc + "/" + self.object_key
+        response = requests.get(object_url, auth=self.auth)
+        if response.status_code not in (200, 204):
+            if response.length is None:
                     # length == None seems to be returned from GET requests
                     # to non-existing files
                     raise S3FileDoesNotExistError(self.object_key)
-                # catch all other cases
-                raise S3IOError(
-                    'openS3 GET error. '
-                    'Response status: {}. '
-                    'Reason: {}. '
-                    'Response Text: \n'
-                    '{}'.format(response.status, response.reason, response.read()))
-
-            self.buffer = response.read()
-            self.response_headers = response.headers
+            raise S3IOError(
+                'openS3 GET error. '
+                'Response status: {}. '
+                'Reason: {}.'.format(response.status_code, response.reason))
+        else:
+            self.buffer=response.text
 
     def _put(self):
         """PUT contents of file to remote S3 object."""
-        request_headers = self._build_request_headers('PUT', self.object_key)
-        with closing(HTTPConnection(self.netloc)) as conn:
-            conn.request('PUT', self.object_key, self.buffer, headers=request_headers)
-            response = conn.getresponse()
-            if response.status not in (200, 204):
-                raise S3IOError(
-                    'openS3 PUT error. '
-                    'Response status: {}. '
-                    'Reason: {}. '
-                    'Response Text: \n'
-                    '{}'.format(response.status, response.reason, response.read()))
+        object_url = "https://" + self.netloc + "/" + self.object_key
+        response = requests.put(object_url, data=self.buffer, auth=self.auth)
+        if response.status_code not in (200, 204):
+            raise S3IOError(
+                'openS3 PUT error. '
+                'Response status: {}. '
+                'Reason: {}.'.format(response.status_code, response.reason))
+        else:
+            return True
 
     def delete(self):
         """
         Remove file from its S3 bucket.
         """
-        headers = self._build_request_headers('DELETE', self.object_key)
-        with closing(HTTPConnection(self.netloc)) as conn:
-            conn.request('DELETE', self.object_key, headers=headers)
-            response = conn.getresponse()
-            if response.status not in (200, 204):
-                raise S3IOError(
-                    'openS3 DELETE error. '
-                    'Response status: {}. '
-                    'Reason: {}. '
-                    'Response Text: \n'
-                    '{}'.format(response.status, response.reason, response.read()))
-        # Reset OpenS3 object
-        self.__init__(self.bucket, self.access_key, self.secret_key)
+        object_url = "https://" + self.netloc + "/" + self.object_key
+        response = requests.delete(object_url, data=self.buffer, auth=self.auth)
+        if response.status_code not in (200, 204):
+            raise S3IOError(
+                'openS3 PUT error. '
+                'Response status: {}. '
+                'Reason: {}.'.format(response.status_code, response.reason))
+        self.__init__(self.bucket)
 
     def exists(self):
         """
@@ -250,156 +252,71 @@ class OpenS3(object):
         raise S3IOError(
             'openS3 HEAD error. '
             'Response status: {}. '
-            'Reason: {}. '
-            'Response Text: \n'
-            '{}'.format(response.status, response.reason, response.read()))
+            'Reason: {}.\n'.format(response.status, response.reason))
 
-    def listdir(self):
-        """
-        Return a 2-tuple of directories and files in ``object_key``.
+def test():
+    import yaml
+    import json
+    # get contents of local test file.
+    source = "OpenS3/testfile.yml"
+    destination = "testfile.json"
+    testfile = open(os.getcwd() + "/" + source, "r")
+    testfile_dict = {}
+    try:
+        testfile_dict = yaml.safe_load(testfile)
+    except yaml.YAMLError as exc:
+        exit(1)
 
-        :rtype: tuple
-        """
-        # Any mode besides 'rb' doesn't make sense when listing a
-        # directory's contents.
-        if self.mode != 'rb':
-            raise ValueError('Mode must be "rb" when calling listdir.')
-        # Ensure that self.object_key has the structure of a path,
-        # rather than a file.
-        if self.object_key[-1] != '/':
-            raise ValueError('listdir can only operate on directories (ie. object keys that '
-                             'end in "/"). Given key: {}'.format(self.object_key))
+    # create opens3 object
+    openS3 = OpenS3(Config.CONFIG_BUCKET)
 
-        if self.object_key[-1] != '/':
-            raise ValueError('listdir can only operate on directories (ie. object keys that '
-                             'end in "/"). Given key: {}'.format(self.object_key))
+    # Write test file to s3 bucket
+    object_key = Config.CONFIG_PATH + destination
+    try:
+        with openS3(object_key=object_key, content_type="text/plain", mode="wb") as f:
+            f.write(json.dumps(testfile_dict))
+    except S3IOError as e:
+        print("Save of {} onto s3 failed because {}".format(object_key,e))
 
-        if '/' in self.object_key.strip('/'):
-            raise NotImplementedError('Listing subdirectories of bucket is not supported.')
+    # read test file from s3 bucket
+    content: str = "{}"
+    try:
+        with openS3(object_key=object_key, content_type="text/plain", mode="rb") as f:
+            content = f.read()
+    except S3IOError as e:
+        print("Fetch of {} from s3 failed because {}".format(object_key, e))
 
-        datetime_now = datetime.utcnow()
-        iso_8601_timestamp = datetime_now.strftime('%Y%m%dT%H%M%SZ')
-        # Strip slashes from object_key. AWS doesn't like leading/trailing slashes
-        # in the value associated with the prefix parameter.
-        prefix = self.object_key.strip('/')
-        query_string_dict = {'prefix': prefix} if prefix else {}
-        header_dict = {
-            'Host': self.netloc,
-            'x-amz-date': iso_8601_timestamp,
-            'x-amz-content-sha256': hashlib.sha256(''.encode()).hexdigest()
-        }
+    # save file to yaml
+    try:
+        content_dict = json.loads(content)
+    except:
+        content_dict = '{}'
+        print("file from s3 is not a json file")
 
-        # Get Canonical Request
-        http_verb = 'GET'
-        canonical_uri = uri_encode('/')
-        canonical_query_string = get_canonical_query_string(query_string_dict)
-        canonical_headers = get_canonical_headers_string(header_dict) + '\n'
-        signed_headers = ';'.join(header for header in sorted(header_dict.keys())).lower()
-        hashed_payload = hashlib.sha256(''.encode()).hexdigest()
-        canonical_request = '\n'.join((
-            http_verb,
-            canonical_uri,
-            canonical_query_string,
-            canonical_headers,
-            signed_headers,
-            hashed_payload
-        ))
+    try:
+        destination_out = "openS3/testfile_out.yml"
+        file = open(destination_out, "w")
+        yaml.dump(content_dict, file)
+        file.close()
+    except Exception as e:
+        print("Save of {} onto file system failed because {}".format(destination, e))
 
-        # Get StringToSign
-        request_scope = ('{date}/{aws_region}/{aws_service}/aws4_request'
-                         ''.format(date=datetime_now.strftime('%Y%m%d'),
-                                   aws_region=AWS_S3_REGION,
-                                   aws_service=AWS_S3_SERVICE))
-        canonical_request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
-        string_to_sign = '\n'.join((
-            'AWS4-HMAC-SHA256',
-            iso_8601_timestamp,
-            request_scope,
-            canonical_request_hash
-        ))
+    # save file to json
+    try:
+        destination_out = "openS3/testfile_out.json"
+        file = open(destination_out, "w")
+        file.write(content)
+        file.close()
+    except S3IOError as e:
+        print("Save of {} failed because {}".format(destination, e))
 
-        # Get SigningKey
-        signing_key = get_signing_key(self.secret_key,
-                                      datetime_now.strftime('%Y%m%d'),
-                                      AWS_S3_REGION,
-                                      AWS_S3_SERVICE)
+    # print original file content after round trip to s3
+    try:
+        print(yaml.dump(content_dict, sort_keys=False, default_flow_style=False))
+    except Exception as e:
+        print("Save of {} onto file system failed because {}".format(destination, e))
+    pass
 
-        # Get Signature
-        signature = hmac_sha256(signing_key, string_to_sign, digest=False).hexdigest()
+if __name__ == '__main__':
+    test()
 
-        credential_str = '{access_key}/{scope}'.format(access_key=self.access_key,
-                                                       scope=request_scope)
-        authorization_str = ('AWS4-HMAC-SHA256 Credential={credential_str},'
-                             'SignedHeaders={header_str},Signature={signature}'
-                             ''.format(credential_str=credential_str,
-                                       header_str=signed_headers,
-                                       signature=signature))
-        header_dict['Authorization'] = authorization_str
-
-        # Build query string
-        query_string = '?' + canonical_query_string if canonical_query_string else ''
-        path = '/{}'.format(query_string)
-
-        # Run query
-        with closing(HTTPConnection(self.netloc)) as conn:
-            conn.request('GET', path, headers=header_dict)
-            response = conn.getresponse()
-            response_body = response.read()
-            if response.status not in (200, 204):
-                raise S3IOError(
-                    'openS3 GET error during listdir. '
-                    'Response status: {}. '
-                    'Reason: {}. '
-                    'Response Text: \n'
-                    '{}'.format(response.status, response.reason, response.read()))
-
-        root = ElementTree.fromstring(response_body)
-        # Work around xml namespace.
-        aws_xmlns_namespace = root.tag.rstrip('ListBucketResult').strip('{}')
-        namespaces = {'aws': aws_xmlns_namespace}
-        key_element_list = root.findall('aws:Contents/aws:Key', namespaces)
-        key_list = [k.text for k in key_element_list]
-        # Strip leading slash from object_key since we need to match against
-        # the keys without leading slashes that AWS returns.
-        return get_dirs_and_files(key_list, self.object_key)
-
-    def _request_signature(self, string_to_sign):
-        """
-        Construct a signature by making an RFC2104 HMAC-SHA1
-        of the following and converting it to Base64 UTF-8 encoded string.
-        """
-        digest = hmac.new(
-            self.secret_key.encode(ENCODING),
-            string_to_sign.encode(ENCODING),
-            hashlib.sha1
-        ).digest()
-        return b64_string(digest)
-
-    def _build_request_headers(self, method, object_key):
-        headers = dict()
-
-        headers['Date'] = format_date_time(datetime.now().timestamp())
-        # Only get size of file if there's data in the buffer.
-        # Else will have some run away recursion.
-        if self.buffer:
-            headers['Content-Length'] = self.size
-        headers['Content-MD5'] = self.md5hash
-        headers['Content-Type'] = self.content_type
-        headers['x-amz-acl'] = self.acl
-
-        if self.extra_request_headers:
-            headers.update(self.extra_request_headers)
-
-        if self.access_key and self.secret_key:
-            string_to_sign_list = [
-                method,
-                headers['Content-MD5'],
-                headers['Content-Type'],
-                headers['Date'],
-                'x-amz-acl:{}'.format(headers['x-amz-acl']),
-                '/' + self.bucket + object_key
-            ]
-            signature = self._request_signature('\n'.join(string_to_sign_list))
-            headers['Authorization'] = ''.join(['AWS' + ' ', self.access_key, ':', signature])
-
-        return headers

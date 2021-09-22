@@ -8,6 +8,7 @@ CONTENT_TYPES = {
     "html": "text/html",
     "jpeg": "image/jpeg",
     "jpg": "image/jpeg",
+    "json": "application/json",
     "mp3": "audio/mpeg",
     "pdf": "application/pdf",
     "png": "image/png",
@@ -28,7 +29,7 @@ VALID_MODES = {
 
 DEFAULT_CONTENT_TYPE = 'binary/octet-stream'
 
-OBJECT_URL_SCHEME = 'http'
+OBJECT_URL_SCHEME = 'https'
 
 # http://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region
 AWS_S3_REGION = 'us-east-1'

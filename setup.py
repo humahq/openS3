@@ -1,66 +1,37 @@
-#! /usr/bin/env python
+"""Setup.py for openS3"""
 
-import os
-import sys
+from setuptools import setup, find_packages
 
-from setuptools import setup
-from setuptools.command.test import test as TestCommand
+# Pull in the package info
+package_name = 'openS3'
+package = __import__(package_name)
+version = package.__version__
+author = package.__author__
+email = package.__email__
 
-import openS3
-
-
-with open(os.path.join(os.path.dirname(__file__), "README.rst")) as file:
-    README = file.read()
-
-with open(os.path.join(os.path.dirname(__file__), 'LICENSE')) as file:
-    LICENSE = file.read()
-
-
-class Tox(TestCommand):
-    """Command to make python setup.py test run."""
-
-    def finalize_options(self):
-        super().finalize_options()
-        self.test_args = []
-        self.test_suite = True
-
-    def run_tests(self):
-        # Do this import here because tests_require isn't processed
-        # early enough to do a module-level import.
-        from tox._cmdline import main
-        sys.exit(main(self.test_args))
-
-
-CLASSIFIERS = [
-    "Development Status :: 3 - Alpha",
-    "Environment :: Web Environment",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: BSD License",
-    "Natural Language :: English",
-    "Programming Language :: Python",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.3",
-    "Programming Language :: Python :: 3.4",
-    "Programming Language :: Python :: 3 :: Only",
-    "Topic :: Internet",
-    "Topic :: Internet :: WWW/HTTP",
-    "Topic :: Utilities",
-]
-
-
-setup(name='openS3',
-      version=openS3.__version__,
-      author=openS3.__author__,
-      author_email=openS3.__email__,
-      maintainer=openS3.__author__,
-      maintainer_email=openS3.__email__,
-      url='http://github.com/logston/openS3',
-      description='A pythonic way to upload and download from AWS S3.',
-      long_description=README,
-      license=LICENSE,
-      classifiers=CLASSIFIERS,
-      packages=['openS3'],
-      include_package_data=True,
-      package_data={'': ['LICENSE', 'README.rst']},
-      tests_require=['tox'],
-      cmdclass={'test': Tox})
+setup(
+    name=package_name,
+    version=version,
+    description='A pythonic way to open s3 files',
+    author=author,
+    author_email=email,
+    maintainer=author,
+    maintainer_email=email,
+    packages=find_packages(),
+    include_package_data=True,
+    install_requires=[
+    'aws-requests-auth',
+    'PyYAML',
+    'aws-requests-auth'
+    ],
+    license='Proprietary',
+    keywords='',
+    classifiers=[
+        'Development Status :: 2 - Pre-Alpha',
+        'Intended Audience :: Developers',
+        'License :: Proprietary',
+        'Natural Language :: English',
+        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: Implementation :: CPython'
+    ],
+)
